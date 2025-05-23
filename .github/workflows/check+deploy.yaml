@@ -13,7 +13,6 @@ jobs:
       - name: Checkout git repository
         uses: actions/checkout@v3
         with:
-          path: _src/
 
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -21,17 +20,14 @@ jobs:
           python-version: '3.10'
 
       - name: Install dependencies
-              shell: bash
-              run: |
-                pushd _src
-                python3 -m pip install --upgrade pip setuptools wheel build
-                python3 -m pip install .
-                popd
+        shell: bash
+        run: |
+          python3 -m pip install --upgrade pip setuptools wheel build
+          python3 -m pip install .
 
       - name: Verify release version matches pyproject.toml version
         shell: bash
         run: |
-          pushd _src
           TAG_VERSION="${GITHUB_REF##refs/tags/v}"
           TOML_VERSION=$(grep '^version' pyproject.toml | head -n1 | cut -d '"' -f2)
           echo "Tag version: $TAG_VERSION"
@@ -40,15 +36,12 @@ jobs:
             echo "Version mismatch between tag and pyproject.toml"
             exit 1
           fi
-          popd
 
       - name: Build distribution
-              shell: bash
-              run: |
-                mkdir dist
-                pushd _src
-                python3 -m build --outdir ../dist
-                popd
+        shell: bash
+        run: |
+          mkdir dist
+          python3 -m build --outdir dist
 
       - name: Verify package metadata
         shell: bash
