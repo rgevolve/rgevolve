@@ -1,0 +1,74 @@
+on:
+  release:
+    types: [published]
+
+name: Deploy Metapackage
+
+jobs:
+  deploy:
+    name: Build & Deploy Metapackage
+    runs-on: ubuntu-latest
+    if: github.event_name == 'release' && startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - name: Checkout git repository
+        uses: actions/checkout@v3
+        with:
+          path: _src/
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+              shell: bash
+              run: |
+                pushd _src
+                python3 -m pip install --upgrade pip setuptools wheel build
+                python3 -m pip install .
+                popd
+
+      - name: Verify release version matches pyproject.toml version
+        shell: bash
+        run: |
+          pushd _src
+          TAG_VERSION="${GITHUB_REF##refs/tags/v}"
+          TOML_VERSION=$(grep '^version' pyproject.toml | head -n1 | cut -d '"' -f2)
+          echo "Tag version: $TAG_VERSION"
+          echo "pyproject.toml version: $TOML_VERSION"
+          if [[ "$TAG_VERSION" != "$TOML_VERSION" ]]; then
+            echo "Version mismatch between tag and pyproject.toml"
+            exit 1
+          fi
+          popd
+
+      - name: Build distribution
+              shell: bash
+              run: |
+                mkdir dist
+                pushd _src
+                python3 -m build --outdir ../dist
+                popd
+
+      - name: Verify package metadata
+        shell: bash
+        run: |
+          python3 -m pip install twine
+          python3 -m twine check dist/*
+
+      - name: Test installing the wheel
+        shell: bash
+        run: |
+          python3 -m pip install dist/rgevolve-*.whl
+
+      - name: Upload build as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rgevolve-dist-${{ github.sha }}
+          path: dist
+
+      - name: Upload to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          user:     ${{ secrets.TWINE_USERNAME }}
+          password: ${{ secrets.TWINE_PASSWORD }}
