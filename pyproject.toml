@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools >= 80.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rgevolve"
+version = "0.1.0"
+authors = [
+    {name = "Aleks Smolkovič", email = "aleks.smolkovic@ijs.si"},
+    {name = "Peter Stangl", email = "peter.stangl@cern.ch"},
+]
+description = "rgevolve metapackage: install all rgevolve components at once"
+requires-python = ">=3.8"
+license = {text = "MIT"}
+readme = "README.md"
+dependencies = [
+    "rgevolve-core",
+    "rgevolve.smeft.warsaw",
+    "rgevolve.smeft.warsaw_up",
+    "rgevolve.wet.flavio",
+    "rgevolve.wet.jms",
+    "rgevolve.wet_4.flavio",
+    "rgevolve.wet_4.jms",
+    "rgevolve.wet_3.flavio",
+    "rgevolve.wet_3.jms",
+]
