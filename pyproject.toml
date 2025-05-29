@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools >= 80.0"]
+requires = ["setuptools >= 61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "rgevolve"
-version = "0.1.0"
+version = "0.1.1"
 authors = [
     {name = "Aleks Smolkovič", email = "aleks.smolkovic@ijs.si"},
     {name = "Peter Stangl", email = "peter.stangl@cern.ch"},
@@ -14,13 +14,13 @@ requires-python = ">=3.8"
 license = {text = "MIT"}
 readme = "README.md"
 dependencies = [
-    "rgevolve-core==0.1.0",
-    "rgevolve.smeft.warsaw==0.1.0",
-    "rgevolve.smeft.warsaw_up==0.1.0",
-    "rgevolve.wet.flavio==0.1.0",
-    "rgevolve.wet.jms==0.1.0",
-    "rgevolve.wet_4.flavio==0.1.0",
-    "rgevolve.wet_4.jms==0.1.0",
-    "rgevolve.wet_3.flavio==0.1.0",
-    "rgevolve.wet_3.jms==0.1.0",
+    "rgevolve-core==0.1.1",
+    "rgevolve.smeft.warsaw==0.1.1",
+    "rgevolve.smeft.warsaw_up==0.1.1",
+    "rgevolve.wet.flavio==0.1.1",
+    "rgevolve.wet.jms==0.1.1",
+    "rgevolve.wet_4.flavio==0.1.1",
+    "rgevolve.wet_4.jms==0.1.1",
+    "rgevolve.wet_3.flavio==0.1.1",
+    "rgevolve.wet_3.jms==0.1.1",
 ]
