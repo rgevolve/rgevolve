@@ -416,8 +416,9 @@ with the one-line pointer note.
 
 ### Step 6 — Cleanup (optional)
 
-TestPyPI artifacts persist permanently — that's fine. To tidy up
-GitHub Releases + tags across all 10 repos:
+TestPyPI artifacts persist permanently — that's fine. Tidy up the
+GitHub Releases + tags across all 10 repos either with `gh` (if
+installed):
 
 ```bash
 TAG=v0.1.2.dev0
@@ -430,6 +431,17 @@ for repo in rgevolve-core \
   gh release delete "$TAG" --repo "rgevolve/$repo" --yes --cleanup-tag || true
 done
 ```
+
+…or with the bundled `curl`-based script (no `gh` required):
+
+```bash
+export GH_TOKEN=<fine-grained PAT with contents:write on the 10 repos>
+bash .github/scripts/cleanup-rehearsal.sh v0.1.2.dev0
+```
+
+The PAT here can be the same one that backs `ORG_RELEASE_TOKEN`, or
+a fresh fine-grained PAT created and discarded for cleanup. The
+script is idempotent: missing releases/tags are skipped silently.
 
 ### Rehearsal failure modes & remedies
 
