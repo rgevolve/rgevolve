@@ -37,15 +37,15 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Physics",
 ]
 dependencies = [
-    "rgevolve-core==0.1.1",
-    "rgevolve.smeft.warsaw==0.1.1",
-    "rgevolve.smeft.warsaw_up==0.1.1",
-    "rgevolve.wet.flavio==0.1.1",
-    "rgevolve.wet.jms==0.1.1",
-    "rgevolve.wet_4.flavio==0.1.1",
-    "rgevolve.wet_4.jms==0.1.1",
-    "rgevolve.wet_3.flavio==0.1.1",
-    "rgevolve.wet_3.jms==0.1.1",
+    "rgevolve-core==0.2.0",
+    "rgevolve.smeft.warsaw==0.2.0",
+    "rgevolve.smeft.warsaw_up==0.2.0",
+    "rgevolve.wet.flavio==0.2.0",
+    "rgevolve.wet.jms==0.2.0",
+    "rgevolve.wet_4.flavio==0.2.0",
+    "rgevolve.wet_4.jms==0.2.0",
+    "rgevolve.wet_3.flavio==0.2.0",
+    "rgevolve.wet_3.jms==0.2.0",
 ]
 
 [project.urls]
