@@ -1,26 +1,22 @@
 # Releasing rgevolve
 
 Operator-facing guide for cutting a **production** release of the
-rgevolve ecosystem. The day-to-day flow is **Step 1** + **Step 2**
-below — most operators won't need anything else. The later sections
-(*One-time setup*, *TestPyPI rehearsal*) are needed once, before the
-first-ever production release.
+rgevolve ecosystem (10 PyPI distributions versioned in lockstep —
+`pip install rgevolve==X.Y.Z` resolves to a fixed set of `==X.Y.Z`
+sub-packages). **Never release one package without the others** —
+the orchestrator described below enforces this by fanning out to all
+ten in a single `workflow_dispatch`.
 
-## The lockstep invariant
+Two recurring concerns:
 
-rgevolve ships as ten separately installable PyPI distributions —
-`rgevolve-core`, the eight matrix packages (`rgevolve.smeft.warsaw`,
-`rgevolve.smeft.warsaw_up`, `rgevolve.wet.flavio`,
-`rgevolve.wet.jms`, `rgevolve.wet_3.flavio`, `rgevolve.wet_3.jms`,
-`rgevolve.wet_4.flavio`, `rgevolve.wet_4.jms`), and the meta package
-(`rgevolve`) — but is versioned in lockstep: every release advances
-all ten packages to the same `X.Y.Z`. The meta-package's
-`pyproject.toml` pins each sub-package with `==X.Y.Z`, so
-`pip install rgevolve==X.Y.Z` resolves to a fixed, reproducible set.
+- **Cutting a release** (frequent) — this section, immediately below.
+  Most operators won't need anything else.
+- **Rotating the `ORG_RELEASE_TOKEN` PAT** (~yearly) — see
+  *Managing `ORG_RELEASE_TOKEN`* further down. The PAT expires; the
+  orchestrator stops working when it does.
 
-**Never release one package without the others.** The orchestrator
-described below enforces this by fanning out to all ten in a single
-`workflow_dispatch`.
+One-time setup is only needed before the first-ever production
+release — see *One-time setup* and *TestPyPI rehearsal* at the bottom.
 
 ## Cutting a release
 
@@ -179,69 +175,120 @@ correct trade-off.
 
 ---
 
-The remaining sections cover **first-time setup** and the **TestPyPI
-rehearsal**. They are needed once, before the first-ever production
-release (and the rehearsal also runs again after any non-trivial
-change to the orchestrator). Day-to-day releases need none of this.
+The remaining sections cover the recurring **`ORG_RELEASE_TOKEN`**
+maintenance and one-time setup. Day-to-day releases need none of this.
 
-## One-time setup
-
-Three pieces have to be in place before the orchestrator can run a
-production release.
-
-### `ORG_RELEASE_TOKEN` secret on `rgevolve/rgevolve`
+## Managing `ORG_RELEASE_TOKEN`
 
 The orchestrator runs on `rgevolve/rgevolve` but acts across all 10
 lockstep repos: it pushes tags, creates GitHub Releases on the 9
 sub-repos, dispatches each repo's `release.yml` via `gh workflow
 run`, and commits the pin rewrite to `main`. The default
-`GITHUB_TOKEN` is scoped to the current repo only. A fine-grained PAT
-with explicit access to all 10 repos is needed instead.
+`GITHUB_TOKEN` is scoped to the current repo only, so the
+orchestrator authenticates with a fine-grained PAT exposed to the
+workflow as the `ORG_RELEASE_TOKEN` repo secret.
 
-**Create the fine-grained PAT.**
+The PAT expires after the duration set when it was created (default
+1 year; GitHub no longer offers "no expiration" for fine-grained
+PATs). When it expires, the orchestrator stops working — releases
+fail at the first `gh release create`. **GitHub emails the token
+owner ~7 days before expiration**; treat that email as the trigger
+to rotate.
+
+### Check current expiration
+
+Open https://github.com/settings/personal-access-tokens. Find the
+token (`rgevolve-orchestrator`, or whatever you named it). The list
+shows the expiration date, with a red badge once the token is within
+~30 days of expiry.
+
+### Create or rotate the PAT
+
+This procedure covers both **first-time creation** and **rotation
+when the existing token is near expiry**. The only differences are
+in step 4 (add new vs. update existing secret) and step 6 (no old
+PAT to revoke for first-time); the rest is identical.
+
+#### 1. Generate a new fine-grained PAT
 
 1. Open https://github.com/settings/personal-access-tokens/new.
-2. *Token name*: e.g. `rgevolve-orchestrator`.
-3. *Resource owner*: `rgevolve` (the org). If the dropdown doesn't
-   offer `rgevolve`, you need to be added as a member of the org
-   first — ask another maintainer.
-4. *Expiration*: pick a duration; 1 year is reasonable. (GitHub no
-   longer offers "no expiration" for fine-grained tokens; mark your
-   calendar to rotate.)
-5. *Repository access* → *Only select repositories* → pick all 10:
-   `rgevolve-core`, `rgevolve.smeft.warsaw`, `rgevolve.smeft.warsaw_up`,
-   `rgevolve.wet.flavio`, `rgevolve.wet.jms`, `rgevolve.wet_3.flavio`,
-   `rgevolve.wet_3.jms`, `rgevolve.wet_4.flavio`, `rgevolve.wet_4.jms`,
-   `rgevolve`.
-6. *Repository permissions*:
-   - **Contents**: *Read and write* — for tag pushes, the pin-rewrite
-     commit, and GitHub Release creation.
+2. **Token name**: descriptive + dated, e.g.
+   `rgevolve-orchestrator-2027`. Disambiguates from older tokens
+   still in your list.
+3. **Resource owner**: `rgevolve` (the org). If the dropdown doesn't
+   offer `rgevolve`, you've lost org membership — fix that first.
+4. **Expiration**: pick a duration. 1 year is reasonable. Mark your
+   calendar (GitHub's 7-day-out email helps but is easy to miss).
+5. **Repository access**:
+   - **All repositories** (recommended) — gives the PAT access to
+     every repo under `rgevolve`. Simpler, and there's no risk of
+     forgetting to add a future repo. The `rgevolve` org exists for
+     this one project, so the broader scope isn't a meaningful loss
+     of containment.
+   - *Alternative*: **Only select repositories** → pick all 10:
+     `rgevolve-core`, `rgevolve.smeft.warsaw`,
+     `rgevolve.smeft.warsaw_up`, `rgevolve.wet.flavio`,
+     `rgevolve.wet.jms`, `rgevolve.wet_3.flavio`,
+     `rgevolve.wet_3.jms`, `rgevolve.wet_4.flavio`,
+     `rgevolve.wet_4.jms`, `rgevolve`. Stricter, but you'll have to
+     update the PAT manually if rgevolve ever adds an 11th lockstep
+     repo.
+6. **Repository permissions**:
+   - **Contents**: *Read and write* — for tag pushes, the
+     pin-rewrite commit, and GitHub Release creation.
    - **Actions**: *Read and write* — for `gh workflow run` to
      dispatch each repo's `release.yml`.
    - Leave all other permissions at *No access*.
 7. Click **Generate token** and copy the `github_pat_…` value
    immediately (you can't view it again — only regenerate).
 
-**Approve the PAT (org owners).** If the `rgevolve` org has
-*Personal access token policies → Require approval for new
-fine-grained PATs* enabled, the token is in a *Pending* state until
-an org owner approves it at
-https://github.com/organizations/rgevolve/settings/personal-access-tokens-pending.
+#### 2. Get the PAT approved (if required)
+
+If the `rgevolve` org has *Personal access token policies → Require
+approval for new fine-grained PATs* enabled, the token is in
+*Pending* state until an org owner approves it at:
+
+https://github.com/organizations/rgevolve/settings/personal-access-tokens-pending
+
 If approval isn't required, skip this.
 
-**Add the token as a repo secret.**
+#### 3. Add or update the GitHub secret
 
-1. Open https://github.com/rgevolve/rgevolve/settings/secrets/actions.
-2. Click **New repository secret**.
-3. *Name*: `ORG_RELEASE_TOKEN` (must match the workflow exactly).
-4. *Secret*: paste the `github_pat_…` value.
-5. Click **Add secret**.
+Open https://github.com/rgevolve/rgevolve/settings/secrets/actions.
 
-A common silent failure is forgetting *Actions: write* in step 6.
+- **First-time creation**: click **New repository secret**.
+  - *Name*: `ORG_RELEASE_TOKEN` (must match the workflow exactly).
+  - *Secret*: paste the `github_pat_…` value.
+  - Click **Add secret**.
+- **Rotation**: click the existing `ORG_RELEASE_TOKEN` secret →
+  **Update** → paste the new `github_pat_…` value → **Update
+  secret**.
+
+#### 4. Verify with a TestPyPI rehearsal
+
+Trigger a TestPyPI rehearsal (see *TestPyPI rehearsal* below) to
+confirm the new token works end-to-end before the next production
+release. This catches the most common silent failure: forgetting
+*Actions: write* in step 6 above. With that permission missing,
 `gh release create` succeeds but `gh workflow run` fails with
 `HTTP 403: Resource not accessible by personal access token`. If
 that happens, regenerate the PAT with the missing permission and
-update the secret.
+re-update the secret.
+
+#### 5. Revoke the old PAT (rotation only)
+
+For first-time creation there's no old PAT — skip this.
+
+For rotation: once the rehearsal succeeds, revoke the old PAT at
+https://github.com/settings/personal-access-tokens → click the old
+token → **Revoke**. (The new secret value already overrides the old
+token's role; revoking the old one just tidies up.)
+
+## One-time setup
+
+Beyond the `ORG_RELEASE_TOKEN` PAT (covered above), two more pieces
+have to be in place before the orchestrator can run a production
+release.
 
 ### PyPI trusted publishers for all 10 packages
 
@@ -293,19 +340,21 @@ Pick one:
 - **Option C — branch protection with a GitHub Apps bypass.** Only
   if Options A/B are unacceptable for policy reasons.
 
-Test the choice by running the first production release (below) and
+Test the choice by running the first production release and
 confirming the `release-meta` job's `git push` succeeds.
 
 ## TestPyPI rehearsal
 
 Before the first-ever production release — and again after any
-non-trivial change to `orchestrate-release.yml` — run the full
-lockstep against TestPyPI. It proves the fan-out, polling, and pin
-rewrite end-to-end without burning a real PyPI version.
+non-trivial change to `orchestrate-release.yml` or after each PAT
+rotation — run the full lockstep against TestPyPI. It proves the
+fan-out, polling, and pin rewrite end-to-end without burning a real
+PyPI version.
 
 ### Prerequisites
 
-- **`ORG_RELEASE_TOKEN`** configured per *One-time setup* above.
+- **`ORG_RELEASE_TOKEN`** configured per *Managing
+  `ORG_RELEASE_TOKEN`* above.
 - **TestPyPI trusted publishers registered for all 10 packages.**
   Same shape as the production table; URL is
   `https://test.pypi.org/manage/project/<dist>/settings/publishing/`.
