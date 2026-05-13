@@ -1,0 +1,241 @@
+name: Orchestrate Release
+
+# Single entry point for cutting a lockstep rgevolve release across all
+# ten PyPI distributions (9 sub-packages + the meta package). See
+# RELEASING.md in this repo for the operator-facing flow; see
+# ORCHESTRATOR-REHEARSAL.md at the workspace root for the TestPyPI
+# dry-run guide.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag, e.g. v0.1.2 (must match an existing draft on this repo)'
+        required: true
+        type: string
+      test:
+        description: 'TestPyPI dry-run (everything routes through TestPyPI; nothing hits production PyPI)'
+        required: false
+        type: boolean
+        default: false
+
+env:
+  # One name per line. Each name is used as both the GitHub repo
+  # (under the rgevolve/ org) and the PyPI distribution.
+  SUBPACKAGES: |
+    rgevolve-core
+    rgevolve.smeft.warsaw
+    rgevolve.smeft.warsaw_up
+    rgevolve.wet.flavio
+    rgevolve.wet.jms
+    rgevolve.wet_3.flavio
+    rgevolve.wet_3.jms
+    rgevolve.wet_4.flavio
+    rgevolve.wet_4.jms
+  META_REPO: rgevolve
+
+jobs:
+  preflight:
+    name: Preflight (draft / inputs check)
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.derive.outputs.version }}
+      notes: ${{ steps.notes.outputs.notes }}
+    steps:
+      - name: Checkout meta (for .github/scripts/)
+        uses: actions/checkout@v4
+
+      - name: Derive version from tag
+        id: derive
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          case "$TAG" in
+            v*) VERSION="${TAG#v}" ;;
+            *)  echo "::error::tag must start with 'v' (got: $TAG)"; exit 1 ;;
+          esac
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Resolved VERSION=$VERSION from TAG=$TAG"
+
+      - name: Verify version is a valid next increment (production mode only)
+        if: ${{ !inputs.test }}
+        env:
+          VERSION: ${{ steps.derive.outputs.version }}
+        run: |
+          set -euo pipefail
+          python3 -m pip install --quiet packaging
+          python3 .github/scripts/check_version.py
+
+      - name: Resolve notes from the meta-repo draft
+        id: notes
+        env:
+          GH_TOKEN: ${{ secrets.ORG_RELEASE_TOKEN }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          echo "Looking up draft '$TAG' on rgevolve/${META_REPO}..."
+          if ! META_JSON=$(gh release view "$TAG" --repo "rgevolve/${META_REPO}" --json isDraft,body 2>/dev/null); then
+            echo "::error::No release '$TAG' on rgevolve/${META_REPO}. Draft one at Releases → Draft a new release with tag $TAG, save as draft (do NOT publish), then re-run."
+            exit 1
+          fi
+          IS_DRAFT=$(echo "$META_JSON" | jq -r '.isDraft')
+          if [ "$IS_DRAFT" != "true" ]; then
+            echo "::error::The '$TAG' release on rgevolve/${META_REPO} is already published. The orchestrator only operates on drafts. Recovery: delete the release (Releases → $TAG → Delete) and the tag (\`git push --delete upstream $TAG\`), re-draft, then re-run."
+            exit 1
+          fi
+          BODY=$(echo "$META_JSON" | jq -r '.body')
+          # Persist notes to a multiline output for downstream jobs.
+          {
+            echo "notes<<__NOTES_EOF__"
+            printf '%s\n' "$BODY"
+            echo "__NOTES_EOF__"
+          } >> "$GITHUB_OUTPUT"
+
+  release-subpackages:
+    name: Fan out to sub-packages
+    needs: preflight
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create sub-package releases + dispatch their release.yml
+        env:
+          GH_TOKEN: ${{ secrets.ORG_RELEASE_TOKEN }}
+          TAG: ${{ inputs.tag }}
+          TEST: ${{ inputs.test }}
+        run: |
+          set -euo pipefail
+          POINTER_NOTE="Part of rgevolve ${TAG}. See https://github.com/rgevolve/${META_REPO}/releases/tag/${TAG} for the lockstep changelog."
+          echo "$SUBPACKAGES" | while IFS= read -r sub; do
+            [ -z "$sub" ] && continue
+            echo "=== ${sub} ==="
+            # GitHub Release object (creates tag at main HEAD; visible on the sub-repo's Releases page).
+            if gh release view "$TAG" --repo "rgevolve/${sub}" >/dev/null 2>&1; then
+              echo "  release ${TAG} already exists on rgevolve/${sub}, skipping create."
+            else
+              gh release create "$TAG" \
+                --repo "rgevolve/${sub}" \
+                --target main \
+                --title "$TAG" \
+                --notes "$POINTER_NOTE"
+              echo "  created release ${TAG} on rgevolve/${sub}."
+            fi
+            # Dispatch the publish workflow against the tag.
+            if [ "$TEST" = "true" ]; then
+              gh workflow run release.yml \
+                --repo "rgevolve/${sub}" \
+                --ref "$TAG" \
+                --field use-testpypi=true
+              echo "  dispatched release.yml on rgevolve/${sub} @ ${TAG} (TestPyPI)."
+            else
+              gh workflow run release.yml \
+                --repo "rgevolve/${sub}" \
+                --ref "$TAG"
+              echo "  dispatched release.yml on rgevolve/${sub} @ ${TAG} (PyPI)."
+            fi
+          done
+
+  wait-for-pypi:
+    name: Wait for sub-packages on (Test)PyPI
+    needs: [preflight, release-subpackages]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Poll index for each sub-package version
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+          TEST: ${{ inputs.test }}
+        run: |
+          set -euo pipefail
+          if [ "$TEST" = "true" ]; then
+            INDEX_HOST="test.pypi.org"
+          else
+            INDEX_HOST="pypi.org"
+          fi
+          echo "Polling https://${INDEX_HOST}/pypi/<dist>/${VERSION}/json (60 × 10s per package)"
+          echo "$SUBPACKAGES" | while IFS= read -r dist; do
+            [ -z "$dist" ] && continue
+            URL="https://${INDEX_HOST}/pypi/${dist}/${VERSION}/json"
+            printf '  %-32s ' "${dist}"
+            for attempt in $(seq 1 60); do
+              CODE=$(curl -s -o /dev/null -w '%{http_code}' "$URL" || echo "000")
+              if [ "$CODE" = "200" ]; then
+                echo "200 (attempt ${attempt})"
+                break
+              fi
+              if [ "$attempt" = "60" ]; then
+                echo
+                echo "::error::Timeout waiting for ${dist}==${VERSION} on ${INDEX_HOST} after 60 × 10s. Last HTTP code: ${CODE}. Inspect the sub-repo's Actions log to see if release.yml failed."
+                exit 1
+              fi
+              sleep 10
+            done
+          done
+
+  release-meta:
+    name: Re-pin and release meta
+    needs: [preflight, wait-for-pypi]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout meta on main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          token: ${{ secrets.ORG_RELEASE_TOKEN }}
+          fetch-depth: 0
+
+      - name: Rewrite meta pins (production mode only)
+        if: ${{ !inputs.test }}
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: python3 .github/scripts/rewrite_meta_pins.py
+
+      - name: Commit + push pin rewrite (production mode only)
+        if: ${{ !inputs.test }}
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          git config user.name  "rgevolve-release-bot"
+          git config user.email "rgevolve-release-bot@users.noreply.github.com"
+          if git diff --quiet -- pyproject.toml; then
+            echo "pyproject.toml unchanged (likely a re-run after successful pin rewrite). Skipping commit."
+          else
+            git add pyproject.toml
+            git commit -m "Lockstep release ${TAG}: re-pin meta dependencies"
+            git push origin main
+            echo "Committed and pushed pin rewrite."
+          fi
+
+      - name: Publish the draft
+        env:
+          GH_TOKEN: ${{ secrets.ORG_RELEASE_TOKEN }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          STATE=$(gh release view "$TAG" --repo "rgevolve/${META_REPO}" --json isDraft -q .isDraft)
+          if [ "$STATE" = "true" ]; then
+            gh release edit "$TAG" --repo "rgevolve/${META_REPO}" --draft=false
+            echo "Published draft ${TAG} on rgevolve/${META_REPO} (GitHub auto-created the tag at current main HEAD)."
+          else
+            echo "Release ${TAG} on rgevolve/${META_REPO} is already published (re-run). Skipping."
+          fi
+
+      - name: Dispatch meta release.yml
+        env:
+          GH_TOKEN: ${{ secrets.ORG_RELEASE_TOKEN }}
+          TAG: ${{ inputs.tag }}
+          TEST: ${{ inputs.test }}
+        run: |
+          set -euo pipefail
+          if [ "$TEST" = "true" ]; then
+            gh workflow run release.yml \
+              --repo "rgevolve/${META_REPO}" \
+              --ref "$TAG" \
+              --field use-testpypi=true
+            echo "Dispatched release.yml on rgevolve/${META_REPO} @ ${TAG} (TestPyPI)."
+          else
+            gh workflow run release.yml \
+              --repo "rgevolve/${META_REPO}" \
+              --ref "$TAG"
+            echo "Dispatched release.yml on rgevolve/${META_REPO} @ ${TAG} (PyPI)."
+          fi
