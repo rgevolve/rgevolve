@@ -171,3 +171,9 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+# Private agent-workflow files — workspace-local, not for public commit
+/CLAUDE.md
+docs/PLAN.md
+docs/PLAN-archive-*.md
+/dev/
